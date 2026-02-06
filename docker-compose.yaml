@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # 1. Твоя база данных (DWH) - сюда будем лить данные
+  postgres_dwh:
+    image: postgres:13
+    container_name: dwh_first_avvail
+    restart: always
+    environment:
+      POSTGRES_USER: ${DWH_USER}
+      POSTGRES_PASSWORD: ${DWH_PASSWORD}
+      POSTGRES_DB: ${DWH_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # 2. Системная база для Airflow (чтобы он помнил настройки)
+  postgres_airflow:
+    image: postgres:13
+    container_name: airflow_meta_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${AIRFLOW_DB_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASS}
+      POSTGRES_DB: ${AIRFLOW_DB_NAME}
+    volumes:
+      - ./airflow_db_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # 3. Сам Airflow
+  airflow:
+    image: apache/airflow:2.7.1
+    container_name: airflow_main
+    restart: always
+    user: "${AIRFLOW_UID}:0"
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      # Подключение к своей системной базе:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASS}@postgres_airflow/${AIRFLOW_DB_NAME}
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=${SECRET_KEY}
+      # Создание админа при запуске:
+      - _AIRFLOW_DB_UPGRADE=true
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=${AIRFLOW_ADMIN_USER}
+      - _AIRFLOW_WWW_USER_PASSWORD=${AIRFLOW_ADMIN_PASS}
+      - _AIRFLOW_WWW_USER_ROLE=Admin
+      - _AIRFLOW_WWW_USER_EMAIL=${AIRFLOW_ADMIN_EMAIL}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+    command: bash -c "airflow webserver & airflow scheduler"
+    depends_on:
+      - postgres_airflow
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
